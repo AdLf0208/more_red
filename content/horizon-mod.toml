@@ -1,0 +1,12 @@
+# Port-owned content-mod manifest for the carried More Red logic-gate plate
+# assets and data (the port's `--dev-mod content` folder). The files are the
+# verified carry from `ports/_shared/carry-work/morered/carry-out/carry`, hand
+# scoped and completed as recorded in README.md.
+# Licence: MIT (Commoble, https://github.com/Commoble/morered) — local-only
+# until the maintainer approves publishing.
+id = "morered"
+name = "More Red"
+version = "1.21.1-6.0.0.3"
+api = "0.2"
+side = "both"
+capabilities = ["registries"]

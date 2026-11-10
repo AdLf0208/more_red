@@ -1,0 +1,17 @@
+{
+  "key": {
+    "#": "#c:quarter_slabs/smooth_stone",
+    "r": "#c:dusts/redstone",
+    "t": "minecraft:redstone_torch"
+  },
+  "pattern": [
+    "#t#",
+    "rtr",
+    "#r#"
+  ],
+  "result": {
+    "id": "morered:or_gate",
+    "count": 1
+  },
+  "type": "minecraft:crafting_shaped"
+}

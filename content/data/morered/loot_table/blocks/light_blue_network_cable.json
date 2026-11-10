@@ -1,0 +1,17 @@
+{
+  "pools": [
+    {
+      "bonus_rolls": 0.0,
+      "condition": {
+        "type": "minecraft:survives_explosion"
+      },
+      "entries": [
+        {
+          "name": "morered:light_blue_network_cable",
+          "type": "minecraft:item"
+        }
+      ],
+      "rolls": 1.0
+    }
+  ]
+}

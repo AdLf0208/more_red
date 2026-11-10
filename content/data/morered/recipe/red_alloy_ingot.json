@@ -1,0 +1,14 @@
+{
+  "ingredients": [
+    "#morered:red_alloyable_ingots",
+    "#c:dusts/redstone",
+    "#c:dusts/redstone",
+    "#c:dusts/redstone",
+    "#c:dusts/redstone"
+  ],
+  "result": {
+    "id": "morered:red_alloy_ingot",
+    "count": 1
+  },
+  "type": "minecraft:crafting_shapeless"
+}

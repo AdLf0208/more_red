@@ -1,0 +1,52 @@
+{
+  "variants": {
+    "channel=0": {
+      "model": "morered:block/bundled_cable_relay_plate"
+    },
+    "channel=1": {
+      "model": "morered:block/bundled_cable_relay_plate"
+    },
+    "channel=2": {
+      "model": "morered:block/bundled_cable_relay_plate"
+    },
+    "channel=3": {
+      "model": "morered:block/bundled_cable_relay_plate"
+    },
+    "channel=4": {
+      "model": "morered:block/bundled_cable_relay_plate"
+    },
+    "channel=5": {
+      "model": "morered:block/bundled_cable_relay_plate"
+    },
+    "channel=6": {
+      "model": "morered:block/bundled_cable_relay_plate"
+    },
+    "channel=7": {
+      "model": "morered:block/bundled_cable_relay_plate"
+    },
+    "channel=8": {
+      "model": "morered:block/bundled_cable_relay_plate"
+    },
+    "channel=9": {
+      "model": "morered:block/bundled_cable_relay_plate"
+    },
+    "channel=10": {
+      "model": "morered:block/bundled_cable_relay_plate"
+    },
+    "channel=11": {
+      "model": "morered:block/bundled_cable_relay_plate"
+    },
+    "channel=12": {
+      "model": "morered:block/bundled_cable_relay_plate"
+    },
+    "channel=13": {
+      "model": "morered:block/bundled_cable_relay_plate"
+    },
+    "channel=14": {
+      "model": "morered:block/bundled_cable_relay_plate"
+    },
+    "channel=15": {
+      "model": "morered:block/bundled_cable_relay_plate"
+    }
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "key": {
+    "#": "#c:quarter_slabs/smooth_stone",
+    "i": "#c:ingots/iron",
+    "r": "#c:dusts/redstone"
+  },
+  "pattern": [
+    "#r#",
+    "rir",
+    "#r#"
+  ],
+  "result": {
+    "id": "morered:multiplexer",
+    "count": 1
+  },
+  "type": "minecraft:crafting_shaped"
+}

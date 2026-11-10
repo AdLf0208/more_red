@@ -1,0 +1,6 @@
+{
+  "model": {
+    "model": "morered:item/bitwise_xnor_gate",
+    "type": "minecraft:model"
+  }
+}

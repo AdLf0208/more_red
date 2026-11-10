@@ -1,0 +1,6 @@
+{
+  "model": {
+    "model": "morered:item/bitwise_and_gate",
+    "type": "minecraft:model"
+  }
+}

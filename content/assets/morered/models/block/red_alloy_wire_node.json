@@ -1,0 +1,22 @@
+{
+  "parent": "minecraft:block/block",
+  "ambientocclusion": false,
+  "textures": {
+    "particle": "morered:block/red_alloy_wire",
+    "wire": "morered:block/red_alloy_wire"
+  },
+  "elements": [
+    {
+      "from": [0, 0, 0],
+      "to": [16, 2, 16],
+      "faces": {
+        "down": { "uv": [0, 0, 16, 16], "texture": "#wire" },
+        "up": { "uv": [0, 0, 16, 16], "texture": "#wire" },
+        "north": { "uv": [0, 14, 16, 16], "texture": "#wire" },
+        "south": { "uv": [0, 14, 16, 16], "texture": "#wire" },
+        "west": { "uv": [0, 14, 16, 16], "texture": "#wire" },
+        "east": { "uv": [0, 14, 16, 16], "texture": "#wire" }
+      }
+    }
+  ]
+}

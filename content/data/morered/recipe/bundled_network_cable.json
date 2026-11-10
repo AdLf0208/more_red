@@ -1,0 +1,15 @@
+{
+  "key": {
+    "#": "#morered:red_alloy_wires"
+  },
+  "pattern": [
+    "#",
+    "#",
+    "#"
+  ],
+  "result": {
+    "id": "morered:bundled_network_cable",
+    "count": 3
+  },
+  "type": "minecraft:crafting_shaped"
+}

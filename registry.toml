@@ -1,0 +1,49 @@
+id = "morered"
+kind = "native-mod"
+name = "morered"
+summary = "A Horizon port of morered."
+description = """
+A port of [morered](Commoble/morered) for Horizon.
+
+**Implemented so far**
+
+- The **logic gate plate** family (diode, NOT, AND/OR/NAND/NOR, XOR/XNOR,
+- multiplexer, 2-input AND/NAND, latch, pulse gate): a plate attaches to a face,
+- rotates, reads its input sides, and emits 15 from its output face when its
+- logic function passes. The pure model (`runtime.rs`) has the upstream function
+- table, the 24-entry output-direction table, the clockwise input mapping, the
+- latch's hold/reset rule and the pulse gate's edge/2-tick rule (18 tests).
+- Content: eleven gate blocks (plus the `stone_plate` recipe dependency) on an
+- `end_rod` template with the real `facing`/`rotation`/`input_*`/`powered`
+
+**Not yet ported**
+
+- ~~Placement orientation is not ported (`state_for_placement`)~~: **resolved in
+- slice 10** (see below). A plate placed through vanilla placement now takes
+- its attachment from the clicked face and its rotation from the clicked
+- quadrant (`state_for_placement` + `use_item_on` rod rotation); `/setblock`
+- and native placement were already exact.
+- The carried `end_rod` template gives the plates their 2-px shape and
+- collision, but there is **no lit/unlit tint** (the models' tint indices need
+- a block-colour provider).
+
+Original copyright and licence notices are kept in this repository. Pinned to
+Horizon 1d63e0a and horizon-mixins 5a64af93. Help with the remaining slices is
+welcome.
+"""
+authors = ["AdLf0208"]
+owners = ["AdLf0208"]
+owner_ids = [107615167]
+license = "MIT"
+source = "https://github.com/AdLf0208/morered"
+icon = "icons/morered.png"
+categories = ["utility"]
+tags = ["port", "horizon"]
+
+[[versions]]
+version = "0.1.0"
+published = "2026-11-10"
+game = "26.3"
+file = "morered.hnmod"
+sha256 = "0b343f498bb9f5fa7ec67b4abc381134a594b019f5676806a3927e96162de49a"
+changelog = "First release"

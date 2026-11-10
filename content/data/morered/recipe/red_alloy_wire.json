@@ -1,0 +1,13 @@
+{
+  "key": {
+    "#": "#c:ingots/redstone_alloy"
+  },
+  "pattern": [
+    "###"
+  ],
+  "result": {
+    "id": "morered:red_alloy_wire",
+    "count": 12
+  },
+  "type": "minecraft:crafting_shaped"
+}
