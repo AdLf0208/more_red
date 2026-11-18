@@ -1,0 +1,75 @@
+{
+  "template": "minecraft:basalt",
+  "properties": {
+    "hardness": 0.0,
+    "explosion_resistance": 0.0,
+    "light": 0,
+    "requires_tool": false,
+    "map_color": 28,
+    "sounds": "minecraft:stone"
+  },
+  "shapes": {
+    "property": "axis",
+    "values": {
+      "x": [
+        [
+          0,
+          0,
+          0,
+          0.1875,
+          1,
+          1
+        ]
+      ],
+      "y": [
+        [
+          0,
+          0,
+          0,
+          1,
+          0.1875,
+          1
+        ]
+      ],
+      "z": [
+        [
+          0,
+          0,
+          0,
+          1,
+          1,
+          0.1875
+        ]
+      ]
+    }
+  },
+  "state_properties": {
+    "down": {
+      "type": "boolean"
+    },
+    "up": {
+      "type": "boolean"
+    },
+    "north": {
+      "type": "boolean"
+    },
+    "south": {
+      "type": "boolean"
+    },
+    "west": {
+      "type": "boolean"
+    },
+    "east": {
+      "type": "boolean"
+    }
+  },
+  "default_state": {
+    "axis": "y",
+    "down": "false",
+    "up": "false",
+    "north": "false",
+    "south": "false",
+    "west": "false",
+    "east": "false"
+  }
+}

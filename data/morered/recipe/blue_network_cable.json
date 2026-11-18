@@ -1,0 +1,17 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "redstone",
+  "key": {
+    "#": "minecraft:blue_dye",
+    "w": "#morered:red_alloy_wires"
+  },
+  "pattern": [
+    "www",
+    "w#w",
+    "www"
+  ],
+  "result": {
+    "id": "morered:blue_network_cable",
+    "count": 8
+  }
+}

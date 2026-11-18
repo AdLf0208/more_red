@@ -1,0 +1,13 @@
+{
+  "key": {
+    "#": "#c:slabs/smooth_stone"
+  },
+  "pattern": [
+    "###"
+  ],
+  "result": {
+    "count": 12,
+    "id": "morered:stone_plate"
+  },
+  "type": "minecraft:crafting_shaped"
+}

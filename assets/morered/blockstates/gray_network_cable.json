@@ -1,0 +1,60 @@
+{
+  "multipart": [
+    {
+      "apply": {
+        "model": "morered:block/gray_network_cable_node"
+      },
+      "when": {
+        "down": "true"
+      }
+    },
+    {
+      "apply": {
+        "model": "morered:block/gray_network_cable_node",
+        "x": 180
+      },
+      "when": {
+        "up": "true"
+      }
+    },
+    {
+      "apply": {
+        "model": "morered:block/gray_network_cable_node",
+        "x": 90
+      },
+      "when": {
+        "south": "true"
+      }
+    },
+    {
+      "apply": {
+        "model": "morered:block/gray_network_cable_node",
+        "x": 90,
+        "y": 90
+      },
+      "when": {
+        "west": "true"
+      }
+    },
+    {
+      "apply": {
+        "model": "morered:block/gray_network_cable_node",
+        "x": 90,
+        "y": 180
+      },
+      "when": {
+        "north": "true"
+      }
+    },
+    {
+      "apply": {
+        "model": "morered:block/gray_network_cable_node",
+        "x": 90,
+        "y": 270
+      },
+      "when": {
+        "east": "true"
+      }
+    }
+  ]
+}

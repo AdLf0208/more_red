@@ -1,0 +1,29 @@
+{
+  "template": "minecraft:end_rod",
+  "properties": {
+    "hardness": 0.0,
+    "explosion_resistance": 0.0,
+    "light": 0,
+    "requires_tool": false,
+    "map_color": 14,
+    "sounds": "minecraft:oak_planks"
+  },
+  "shapes": {
+    "property": "facing",
+    "values": {
+      "down": [[0, 0, 0, 1, 0.25, 1]],
+      "up": [[0, 0.75, 0, 1, 1, 1]],
+      "north": [[0, 0, 0, 1, 1, 0.25]],
+      "south": [[0, 0, 0.75, 1, 1, 1]],
+      "west": [[0, 0, 0, 0.25, 1, 1]],
+      "east": [[0.75, 0, 0, 1, 1, 1]]
+    }
+  },
+  "state_properties": {
+    "rotation": { "type": "enum", "values": ["0", "1", "2", "3"] }
+  },
+  "default_state": {
+    "facing": "down",
+    "rotation": "0"
+  }
+}

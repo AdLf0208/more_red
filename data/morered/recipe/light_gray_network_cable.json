@@ -1,0 +1,17 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "redstone",
+  "key": {
+    "#": "minecraft:light_gray_dye",
+    "w": "#morered:red_alloy_wires"
+  },
+  "pattern": [
+    "www",
+    "w#w",
+    "www"
+  ],
+  "result": {
+    "id": "morered:light_gray_network_cable",
+    "count": 8
+  }
+}

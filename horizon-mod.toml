@@ -1,0 +1,21 @@
+id = "morered"
+name = "More Red"
+version = "0.2.0"
+description = """A port of More Red for Horizon: the logic gate plates (diode, NOT, AND/NAND, OR/NOR, XOR/XNOR,
+multiplexer, 2-input gates, latch, pulse gate), the bitwise channeled plates, the red alloy wire, the
+sixteen coloured network cables, the bundled cable with its relay plate, and the red-alloy wire posts
+with their spool. Content and behaviour are one flat package."""
+authors = ["Commoble (upstream)", "AdLf0208"]
+# The one manifest and the only identity. `api` is exact.
+api = "0.2"
+# The installation side, not the hook's: an integrated server belongs to the client
+# installation, so a single-player world or a LAN host needs "both".
+side = "both"
+# The one shared value every manifest carries ("May add blocks, items, mob effects and
+# entity types"). This mod really does declare blocks and block entities.
+capabilities = ["registries"]
+
+[native]
+game = "26.3"
+horizon = "0b14f8acfd97fa2c750e42795249dcc981178ca4"
+mixins = "e59da9094f0c2fdda6c627fe9eff22dec6a906f0"
