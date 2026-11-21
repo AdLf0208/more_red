@@ -1,0 +1,18 @@
+{
+  "recipe": {
+    "file": "data/morered/recipe/redwire_post.json",
+    "tag_items": {
+      "#c:ingots/iron": "minecraft:iron_ingot",
+      "#c:ingots/redstone_alloy": "morered:red_alloy_ingot"
+    },
+    "expect": {
+      "id": "morered:redwire_post",
+      "count": 1
+    },
+    "consume": "morered:red_alloy_ingot"
+  },
+  "loot": {
+    "block": "morered:redwire_post",
+    "expect": "morered:redwire_post"
+  }
+}

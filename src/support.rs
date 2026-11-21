@@ -37,10 +37,11 @@ use mod_api::{
 use crate::runtime::{
     Attached, BitwiseGate, CHANNELS, CableColor, CablePower, Channel, ChannelPower, Dir, Gate,
     POST_LINK_RANGE, PostKind, PostLinks, PulseTick, Side, SpoolClick, bitwise_output,
-    cable_channel_power, cable_power, connects, input_direction, latch_powered, output_direction,
-    perpendicular, placement, placement_attached, plate_seed, post_power, post_signal, pulse_tick,
-    pulse_update, relay_seed, relay_signal, retained, rod_rotation, same_wire_block,
-    shares_attachment, source_power, spool_click, wire_power, wire_signal,
+    cable_channel_power, cable_power, connects, foreign_signal, in_chunk, input_direction,
+    latch_powered, output_direction, perpendicular, placement, placement_attached, plate_seed,
+    post_power, post_signal, pulse_tick, pulse_update, relay_seed, relay_signal, retained,
+    rod_rotation, same_wire_block, shares_attachment, source_power, spool_click, vanilla_source,
+    wire_power, wire_signal,
 };
 
 /// Entries one tick may apply; a safety budget against runaway feedback.
@@ -84,6 +85,10 @@ struct State {
     bitwise: BTreeSet<(String, [i32; 3])>,
     /// Wires queued for the next power solve.
     wires: BTreeSet<(String, [i32; 3])>,
+    /// Queued wires whose neighbour changed, so `updateShape`'s subwire prune applies to them.
+    /// A state written by `/setblock` is not a neighbour change: upstream keeps a forced
+    /// subwire until one of its neighbours changes.
+    wires_prune: BTreeSet<(String, [i32; 3])>,
     /// Bundled cables queued for the next channel solve.
     cables: BTreeSet<(String, [i32; 3])>,
     /// Plates placed/changed this tick: notify their neighbours even when the
@@ -603,6 +608,22 @@ fn mark_wire(dimension: &str, pos: [i32; 3]) {
     });
 }
 
+/// Queue a wire whose **neighbour** changed: the next solve also applies
+/// `AbstractWireBlock.updateShape`'s subwire prune. A state written at the wire's own
+/// position (`/setblock`, a piston) does not arm this — upstream re-evaluates a block's
+/// shape only when a neighbour changes, so a forced state stays until then.
+fn mark_wire_prune(dimension: &str, pos: [i32; 3]) {
+    with_state(|state| {
+        let key = (dimension.to_owned(), pos);
+        if state.wires.len() < MAX_DIRTY {
+            state.wires.insert(key.clone());
+        }
+        if state.wires_prune.len() < MAX_DIRTY {
+            state.wires_prune.insert(key);
+        }
+    });
+}
+
 fn mark_cable(dimension: &str, pos: [i32; 3]) {
     with_state(|state| {
         if state.cables.len() < MAX_DIRTY {
@@ -952,12 +973,63 @@ fn with_attached(
 // ---------------------------------------------------------------------------
 
 /// The signal `pos` gives toward a reader at `from_reader` (the reader-to-source
-/// direction): the engine's `getSignal(pos, source-to-reader)`, which includes this
-/// port's own `block_signal` parts and every other mod's.
+/// direction): the engine's `getSignal(pos, source-to-reader)` for a foreign block, and
+/// this port's own answer for its own blocks.
 fn signal_toward(host: &dyn ServerHost, level: LevelRef, pos: [i32; 3], from_reader: Dir) -> i32 {
-    level
-        .signal(host, pos, from_dir(from_reader.opposite()))
-        .unwrap_or(0)
+    let toward_reader = from_reader.opposite();
+    let Some(state) = block_state(host, level, pos) else {
+        return 0;
+    };
+    let Some(view) = host_view(host, state) else {
+        return 0;
+    };
+    // A plate of this port is directional and answers for the face a query names, while the
+    // engine's own query passes the reading side: the two conventions disagree for a directional
+    // block (a lamp saw a pulse gate's output while the latch beside it did not), so a plate is
+    // read from its own state, toward the side this reader is on.
+    if let Some(plate) = plate_of(&view) {
+        return plate.gate.signal_with_powered(
+            plate.inputs,
+            plate.powered,
+            plate.attachment,
+            plate.rotation,
+            toward_reader,
+        );
+    }
+    if let Some(attached) = wire_attached_of(&view) {
+        // The wire's per-face power is the same cache its `block_signal` answers from.
+        let dimension = level.dimension().id(host).unwrap_or_default();
+        let power = with_state(|state| state.wire_power.get(&key_of(&dimension, pos)).copied())
+            .unwrap_or([0u8; 6]);
+        return wire_signal(power, attached, toward_reader);
+    }
+    // The bundled cable and a bitwise plate answer no vanilla signal at all (upstream
+    // `AbstractWireBlock` / `BitwiseLogicPlateBlock`), and the cable's basalt template would
+    // otherwise conduct its neighbours' power through the engine's aggregate.
+    if cable_attached_of(&view).is_some() || bitwise_of(&view).is_some() {
+        return 0;
+    }
+    // A foreign block: the engine's `signal` includes the power it conducts, so a lit lamp
+    // (a sink) answers the power it receives and would hold a wire up forever. Only a named
+    // source — or an emitter whose two answers differ — gives its `signal`; a block that
+    // reports nothing but what it receives (`direct_signal_to`) is a conductor and gives 0.
+    //
+    // `LevelRef::signal` takes the **reader-to-source** direction ("as a block reads its
+    // neighbour `pos` that lies `direction` from it", `SignalGetter.getSignal`; the level's
+    // own `has_neighbor_signal` calls `signal(rel(pos, d), d)`), so a directional block is
+    // asked for the side this reader is on with `from_reader`, not its opposite: a repeater
+    // `facing=west` answers a reader on its east through `signal(pos, West)`.
+    let plain = level.signal(host, pos, from_dir(from_reader)).unwrap_or(0);
+    let conducted = level.direct_signal_to(host, pos).unwrap_or(0);
+    let known_source = vanilla_source(&view.name) || own_signal_source(&view);
+    foreign_signal(plain, conducted, known_source)
+}
+
+/// Whether a block of this port answers a redstone signal of its own: the relay plate and the
+/// wire posts. The wire and the gate plates are read from their own state above; the bundled
+/// cable and the bitwise plates answer nothing.
+fn own_signal_source(view: &View) -> bool {
+    relay_of(view).is_some() || post_of(view).is_some()
 }
 
 // ---------------------------------------------------------------------------
@@ -1054,7 +1126,7 @@ impl BlockPart for RedstonePart {
         let dimension = dimension_name(event.dimension);
         let pos = [event.pos.x, event.pos.y, event.pos.z];
         if wire_attached_of(&view).is_some() {
-            mark_wire(dimension, pos);
+            mark_wire_prune(dimension, pos);
         } else if cable_attached_of(&view).is_some() {
             mark_cable(dimension, pos);
         } else if relay_of(&view).is_some() {
@@ -1527,7 +1599,7 @@ fn prune_subwires(
 
 /// Recompute the queued wires and everything a change reaches, in one tick.
 fn solve_wires(host: &mut dyn ServerHost, level: LevelRef, dimension: &str) {
-    let mut queue: VecDeque<[i32; 3]> = {
+    let mut queue: VecDeque<([i32; 3], bool)> = {
         let ready: Vec<(String, [i32; 3])> = with_state(|state| {
             let ready: Vec<(String, [i32; 3])> = state
                 .wires
@@ -1540,11 +1612,18 @@ fn solve_wires(host: &mut dyn ServerHost, level: LevelRef, dimension: &str) {
             }
             ready
         });
-        ready.into_iter().map(|(_, pos)| pos).collect()
+        ready
+            .into_iter()
+            .map(|(dimension, pos)| {
+                let key = (dimension, pos);
+                let prune = with_state(|state| state.wires_prune.remove(&key));
+                (pos, prune)
+            })
+            .collect()
     };
     let mut visits: BTreeMap<[i32; 3], u8> = BTreeMap::new();
     let mut steps = MAX_WIRE_STEPS;
-    while let Some(pos) = queue.pop_front() {
+    while let Some((pos, prune)) = queue.pop_front() {
         if steps == 0 {
             break;
         }
@@ -1568,7 +1647,14 @@ fn solve_wires(host: &mut dyn ServerHost, level: LevelRef, dimension: &str) {
             // wire pass; its own channel solve handles it.
             continue;
         };
-        let state = prune_subwires(host, level, dimension, pos, state, attached_now);
+        // `updateShape`'s prune applies only when a neighbour changed; a state written at
+        // this position keeps a forced subwire (upstream never re-evaluates the block's own
+        // shape on a write).
+        let state = if prune {
+            prune_subwires(host, level, dimension, pos, state, attached_now)
+        } else {
+            state
+        };
         let Some(view) = host_view(host, state) else {
             continue;
         };
@@ -1602,7 +1688,7 @@ fn solve_wires(host: &mut dyn ServerHost, level: LevelRef, dimension: &str) {
             }
         }
         for wire in reached.into_iter().flatten() {
-            queue.push_back(wire);
+            queue.push_back((wire, false));
         }
     }
 }
@@ -2085,11 +2171,14 @@ pub fn on_block_changed(level: &dyn LevelHost, event: &mut mod_api::BlockChanged
     } else if post_of(&view).is_some() {
         mark_post(dimension, pos);
     } else {
-        // A removed post keeps its saved links in the cache; tell its peers.
-        let links = with_state(|state| state.post_links.remove(&key)).unwrap_or_default();
+        // A removed post keeps its saved links in the cache until now; tell its peers, then
+        // forget everything this port cached for the position: its power, its links and its
+        // queued work belong to a block that is gone (the review finding).
+        let links = with_state(|state| state.post_links.get(&key).cloned().unwrap_or_default());
         for peer in links.absolute(pos) {
             mark_post(dimension, peer);
         }
+        with_state(|state| evict_node(state, &key));
     }
 }
 
@@ -2173,6 +2262,52 @@ pub fn on_loot_drops(host: &mut dyn ServerHost, event: &mut LootDropsEvent<'_>) 
 /// spool selection belonged to the world that is going away.
 pub fn reset_world_state() {
     *state() = None;
+}
+
+/// Drop every cache entry the port keeps for `key`. A position whose block is gone must not
+/// keep its wire, cable or bitwise power, its saved post links or its queued work: the readout
+/// would answer stale power and the solve would visit a block that is not there (the review
+/// finding).
+fn evict_node(state: &mut State, key: &(String, [i32; 3])) {
+    state.wire_power.remove(key);
+    state.cable_power.remove(key);
+    state.bitwise_power.remove(key);
+    state.post_links.remove(key);
+    state.dirty.remove(key);
+    state.bitwise.remove(key);
+    state.wires.remove(key);
+    state.wires_prune.remove(key);
+    state.cables.remove(key);
+    state.placed.remove(key);
+    state.clearing.remove(key);
+    state.posts.remove(key);
+    state.relays.remove(key);
+}
+
+/// Drop every entry of `dimension` inside `chunk`: its blocks are leaving the world, and a
+/// cache that outlives its chunk is memory the world will never need again (the review
+/// finding). The chunk was saved before it unloads, so nothing here writes.
+fn evict_chunk(state: &mut State, dimension: &str, chunk: [i32; 2]) {
+    let stale = |key: &(String, [i32; 3])| key.0 == dimension && in_chunk(key.1, chunk);
+    state.dirty.retain(|key| !stale(key));
+    state.bitwise.retain(|key| !stale(key));
+    state.wires.retain(|key| !stale(key));
+    state.wires_prune.retain(|key| !stale(key));
+    state.cables.retain(|key| !stale(key));
+    state.placed.retain(|key| !stale(key));
+    state.writing.retain(|key| !stale(key));
+    state.posts.retain(|key| !stale(key));
+    state.relays.retain(|key| !stale(key));
+    state.clearing.retain(|key, _| !stale(key));
+    state.wire_power.retain(|key, _| !stale(key));
+    state.cable_power.retain(|key, _| !stale(key));
+    state.bitwise_power.retain(|key, _| !stale(key));
+    state.post_links.retain(|key, _| !stale(key));
+}
+
+/// A chunk of a dimension unloaded: forget what this port cached for its positions.
+pub fn on_chunk_unload(dimension: &str, chunk: [i32; 2]) {
+    with_state(|state| evict_chunk(state, dimension, chunk));
 }
 
 // ---------------------------------------------------------------------------
@@ -2421,6 +2556,26 @@ fn wire_ids() -> Vec<&'static str> {
     ids
 }
 
+/// Every block of this port that answers a redstone signal, queues work on a neighbour
+/// change and takes its shape from the click: the thirteen gate plates, the six bitwise
+/// plates, the plain wire, the **sixteen coloured network cables** (separate content blocks,
+/// one per dye, so each needs its own `block_part`), the bundled cable, its relay plate and
+/// the three posts. A block missing here never hears `neighbor_changed` and never answers
+/// `block_signal` — the 0.2.0 registration dropped the coloured cables, and the e2e's
+/// coloured-cable phase is what caught it.
+fn signal_block_ids() -> Vec<&'static str> {
+    let mut ids: Vec<&'static str> = GATE_IDS.to_vec();
+    ids.extend(BITWISE_IDS);
+    ids.extend(wire_ids());
+    ids.extend([CABLE_BLOCK, RELAY_BLOCK]);
+    ids.extend([
+        "morered:redwire_post",
+        "morered:redwire_post_plate",
+        "morered:redwire_post_relay_plate",
+    ]);
+    ids
+}
+
 /// Declare the four block entity types, attach each Part, and give every block
 /// the signal/shape behaviour. Called once from `Hooks::register`.
 pub fn register(r: &mut dyn Registrar) {
@@ -2458,14 +2613,14 @@ pub fn register(r: &mut dyn Registrar) {
         r.block_part(key, RedstonePart);
         r.block_part(key, ClickPart);
     }
-    for id in [
-        WIRE_BLOCK,
-        CABLE_BLOCK,
-        RELAY_BLOCK,
-        "morered:redwire_post",
-        "morered:redwire_post_plate",
-        "morered:redwire_post_relay_plate",
-    ] {
+    // Every signal block — the wire family (the plain wire and the sixteen coloured cables),
+    // the bundled cable, the relay plate and the three posts. The coloured cables are separate
+    // content blocks, so each one needs its own `block_part`; leaving them out left them deaf
+    // to `neighbor_changed` and invisible to `block_signal`.
+    for id in signal_block_ids()
+        .into_iter()
+        .filter(|id| !GATE_IDS.contains(id) && !BITWISE_IDS.contains(id))
+    {
         let key = r.block_key(id);
         r.block_part(key, RedstonePart);
     }
@@ -2586,6 +2741,36 @@ mod tests {
     }
 
     #[test]
+    fn every_signal_block_gets_its_part() {
+        // The registration list is the only place a Part is attached, and a block missing
+        // from it never hears `neighbor_changed` (so it never re-solves) and never answers
+        // `block_signal` (so no reader sees it). The 0.2.0 registration dropped the sixteen
+        // coloured cables from the list while the wire's block entity type kept them, and
+        // the e2e's coloured-cable phase failed with a dark lamp while the plain wire on the
+        // same rig read 29.
+        let ids = signal_block_ids();
+        for colour in CableColor::ALL {
+            assert!(ids.contains(&colour.id()), "{} has no part", colour.id());
+        }
+        for id in [
+            "morered:red_alloy_wire",
+            "morered:bundled_network_cable",
+            "morered:bundled_cable_relay_plate",
+            "morered:redwire_post",
+            "morered:redwire_post_plate",
+            "morered:redwire_post_relay_plate",
+            "morered:and_gate",
+            "morered:pulse_gate",
+            "morered:bitwise_and_gate",
+        ] {
+            assert!(ids.contains(&id), "{id} has no part");
+        }
+        // Every content block of the port except the recipe-only `stone_plate` carries one.
+        assert_eq!(ids.len(), 13 + 6 + 17 + 2 + 3);
+        assert!(!ids.contains(&"morered:stone_plate"));
+    }
+
+    #[test]
     fn the_families_are_recognised_by_id() {
         assert!(is_subwire_block("morered:red_alloy_wire"));
         assert!(is_subwire_block("morered:bundled_network_cable"));
@@ -2609,5 +2794,104 @@ mod tests {
             let view = parse_view(&format!("{id}[facing=down,rotation=0]"));
             assert!(bitwise_of(&view).is_some(), "{id} is not a bitwise plate");
         }
+    }
+
+    /// `/setblock` writes a state, it does not place a block: upstream prunes a wire's subwire
+    /// only from `updateShape`, i.e. when a **neighbour** changed, so a state written with a
+    /// subwire whose support is not sturdy stays until a neighbour changes (the 64-state sweep
+    /// reads such a state back). A placement (`block_changed`) must not arm the prune.
+    #[test]
+    fn a_written_wire_is_pruned_only_after_a_neighbour_change() {
+        let dimension = "minecraft:prune_probe";
+        let placed = [5, 64, 4];
+        let neighbour = [6, 64, 4];
+        with_state(|state| {
+            state.wires.clear();
+            state.wires_prune.clear();
+        });
+        mark_wire(dimension, placed);
+        assert!(with_state(|state| state
+            .wires
+            .contains(&(dimension.to_owned(), placed))));
+        assert!(
+            !with_state(|state| state.wires_prune.contains(&(dimension.to_owned(), placed))),
+            "a written state is not a neighbour change"
+        );
+        mark_wire_prune(dimension, neighbour);
+        assert!(with_state(|state| state
+            .wires
+            .contains(&(dimension.to_owned(), neighbour))));
+        assert!(
+            with_state(|state| state
+                .wires_prune
+                .contains(&(dimension.to_owned(), neighbour))),
+            "a neighbour change prunes the shape"
+        );
+    }
+
+    /// The review finding: replacing or removing a wire, cable, bitwise plate or post left its
+    /// cached power in place for the life of the runtime, so the readout could answer stale
+    /// power at a position that no longer holds the block.
+    #[test]
+    fn a_removed_block_loses_every_cached_entry() {
+        let mut state = State::default();
+        let key = ("minecraft:overworld".to_owned(), [4, 70, 4]);
+        state.wire_power.insert(key.clone(), [1, 2, 3, 4, 5, 6]);
+        state.cable_power.insert(key.clone(), CablePower::default());
+        state
+            .bitwise_power
+            .insert(key.clone(), ChannelPower::default());
+        state
+            .post_links
+            .insert(key.clone(), PostLinks::from_offsets(vec![[0, 0, 1]]));
+        state.dirty.insert(key.clone());
+        state.wires.insert(key.clone());
+        state.posts.insert(key.clone());
+
+        let neighbour = ("minecraft:overworld".to_owned(), [5, 70, 4]);
+        state.wire_power.insert(neighbour.clone(), [7; 6]);
+
+        evict_node(&mut state, &key);
+        assert!(!state.wire_power.contains_key(&key));
+        assert!(!state.cable_power.contains_key(&key));
+        assert!(!state.bitwise_power.contains_key(&key));
+        assert!(!state.post_links.contains_key(&key));
+        assert!(!state.dirty.contains(&key));
+        assert!(!state.wires.contains(&key));
+        assert!(!state.posts.contains(&key));
+        assert!(
+            state.wire_power.contains_key(&neighbour),
+            "another position keeps its entry"
+        );
+    }
+
+    /// The second half of that finding: the caches also outlived their chunk. An unload drops
+    /// exactly the entries of that chunk in that dimension.
+    #[test]
+    fn a_chunk_unload_drops_its_cached_positions() {
+        let mut state = State::default();
+        let inside = ("minecraft:overworld".to_owned(), [16, 70, -1]);
+        let outside_x = ("minecraft:overworld".to_owned(), [32, 70, -1]);
+        let outside_dimension = ("minecraft:the_nether".to_owned(), [16, 70, -1]);
+        for key in [&inside, &outside_x, &outside_dimension] {
+            state.wire_power.insert(key.clone(), [1; 6]);
+            state
+                .post_links
+                .insert(key.clone(), PostLinks::from_offsets(vec![[0, 0, 1]]));
+            state.dirty.insert(key.clone());
+        }
+
+        evict_chunk(&mut state, "minecraft:overworld", [1, -1]);
+        assert!(!state.wire_power.contains_key(&inside));
+        assert!(!state.post_links.contains_key(&inside));
+        assert!(!state.dirty.contains(&inside));
+        assert!(
+            state.wire_power.contains_key(&outside_x),
+            "the next chunk keeps its entry"
+        );
+        assert!(
+            state.wire_power.contains_key(&outside_dimension),
+            "another dimension keeps its entry"
+        );
     }
 }

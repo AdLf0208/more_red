@@ -3,12 +3,12 @@
 Ported from **More Red v1.21.1-6.0.0.3** (`Commoble/morered`, **MIT**) for
 Minecraft Java 1.21.1 NeoForge.
 
-Status: **0.2.0, the SDK package** — 66 runtime tests + 9 glue tests, `cargo test`
-/ `clippy -D warnings` / `fmt --check` green, `cargo horizon-mod check` and `fits`
-EXIT 0, a byte-identical second build, and the package at 233,165 B. The 0.1.0
-`cargo horizon-mod`/e2e runs below are **historical** (retired `.hnmod` format);
-**no 0.2.0 in-game run exists** — see `## Migration to the SDK format` and
-`../_shared/evidence/morered/sdk-e2e-status.md`.
+Status: **0.2.2, the SDK package, green end to end** — 84 runtime/glue tests, `cargo test` /
+`clippy -D warnings` / `fmt --check` green, `cargo horizon-mod check` and `fits --build 0b14f8a`
+EXIT 0, two byte-identical builds, and the in-game leg **PASS + EXIT:0** on a launcher-built game
+at pin `0b14f8a` (control `EXIT:1`). The 0.1.0 `cargo horizon-mod`/e2e runs below are
+**historical** (retired `.hnmod` format); see `## In-game leg green (0.2.2)` for the wire solve and
+the three migration defects it exposed.
 
 ## Planned slice
 
@@ -2093,3 +2093,228 @@ capability is approximated by the port's own relay). Added by this format:
 > type, no client renderer).
 
 Skills: superpowers/using-superpowers, brainstorming, writing-plans, test-driven-development, systematic-debugging, verification-before-completion; BeautifulRust/rust-best-practices, rust-port
+
+## Review fixes (2026-11-18 review, rebuilt 2026-11-19 at 0.2.1)
+
+Skills: superpowers/using-superpowers, systematic-debugging, test-driven-development, verification-before-completion; BeautifulRust/rust-best-practices, rust-port
+
+**Findings and fixes:**
+
+1. **`src/support.rs:2060` — caches outlived their blocks and chunks.** `evict_node` drops a
+   position's wire/cable/bitwise power, saved post links and queued work when its block is replaced or
+   removed (`on_block_changed`'s removed branch), and a new `Hooks::chunk_unload` →
+   `support::on_chunk_unload` evicts every cached position of the unloading chunk in that dimension
+   (`evict_chunk`, with `runtime::in_chunk`'s `div_euclid(16)` floor for negative coordinates).
+2. **`src/runtime.rs:1151` — no per-post link limit.** `runtime::MAX_POST_LINKS = 32`;
+   `PostLinks::add` refuses past it and `PostLinks::is_full` reports it, so one post's peer list — the
+   list `post_supply` clones and `solve_posts` enqueues on every visit — stays a fixed amount of work
+   inside the existing `MAX_WIRE_STEPS`/`MAX_WIRE_VISITS` budget.
+
+**Tests.** `runtime::tests::{a_post_keeps_a_bounded_number_of_links,
+a_position_belongs_to_its_own_chunk}` and `support::tests::{a_removed_block_loses_every_cached_entry,
+a_chunk_unload_drops_its_cached_positions}` (all four run red against stubs first).
+
+**Ladder (0.2.1).** `cargo test` 79 passed · clippy `-D warnings` exit 0 · `fmt --check` exit 0 · two
+builds byte-identical · `check` exit 0 (`morered 0.2.1 …`) · `fits --build 0b14f8a` exit 0.
+
+**In game — BLOCKED, not caused by this diff.** `launcher-game.sh run morered` reaches the pulse-gate
+phase and fails at `expected lamp at 4,64,-1 lit=true, got … lit=false` (the pulse does not set the
+latch; `e2e-launcher-FAILED.log`). Rebuilt once with `evict_node`/`evict_chunk` and the `chunk_unload`
+hook disabled, the same phase fails identically, so the review fix is not the cause: the pulse/latch
+solve needs its own slice. `ported` waits for that run.
+
+**Package.** `morered.hmod` **235,619 B**, sha256
+`d3e80bd3f51fe1b7d59a17265c1a0b412cd5d57c83d39c80a98f55782b6e6ac5`.
+
+## In-game leg diagnosis (2026-11-19, still red at 0.2.1 — not publishable)
+
+Skills: superpowers/using-superpowers, systematic-debugging, verification-before-completion; BeautifulRust/rust-best-practices, rust-port
+
+The pulse→latch failure was a **plate-to-plate read** one face off: a *lamp* (the engine's aggregate
+query) saw a pulse gate's output while a *latch* (the port's own `signal_toward` query) beside it did
+not, because the two entry points pass the reading side differently and a plate is directional.
+`signal_toward` now reads this port's own plates from their state (`plate.gate.signal_with_powered`
+toward the reader) and its own wires from the wire power cache, exactly as the hook answers. That
+took the leg through the pulse/latch, bitwise, coloured-cable, drops, placement and rod-rotation
+phases; it now stops in the **wire** section:
+
+    == wire: the middle wire carries the far side (lamp and data differential) ==
+    FAIL: expected lamp at 4,64,20 lit=false, got minecraft:redstone_lamp[lit=true]
+
+Proved **independent of the review fixes**: rebuilt with `evict_node`/`evict_chunk` and the
+`chunk_unload` hook stubbed (`e2e-launcher-FAILED-noevict.log`), the same assertion fails identically.
+The remaining failure is the wire's own decay on a cut line (the far side stays powered), which is the
+next slice: it wants the same treatment (state-based reads) for the wire/cable solve and its
+propagation, not another direction guess.
+
+**Ladder (0.2.1).** `cargo test` 79 · clippy 0 · fmt 0 · two builds byte-identical · `check`/`fits`
+exit 0. Entry stays at 0.2.0 until this leg is green.
+
+**Package (not publishable).** `morered.hmod` **235,895 B**, sha256
+`6475d0f508f460ef85b149e4f4868eeb365feeb668cc943b37995062265aeb33`.
+
+**Superseded by `## In-game leg green (0.2.2)` below** (the leg passes; the 0.2.1 package above was
+never delivered).
+
+## In-game leg green (0.2.2, 2026-11-19)
+
+Skills: superpowers/using-superpowers, systematic-debugging, test-driven-development, verification-before-completion; BeautifulRust/rust-best-practices, rust-port
+
+The 0.2.1 leg stopped at the wire cut phase (`expected lamp at 4,64,20 lit=false, got … lit=true`).
+Four defects, each measured in game rather than guessed; the first is the one the brief named, the
+other three were behind it.
+
+### 1. The wire read a conductor's *conducted* power as its own (the cut line)
+
+`LevelRef::signal` **is** `SignalGetter.getSignal`, documented as "power it conducts included"
+(`ports/_shared/sdk/0b14f8a/api-source`, `crates/horizon-mod-vocab/generated/mod_api_generated_host.rs`:
+`signal`, `direct_signal`, `direct_signal_to`). The measured table at this pin
+(`ports/redstonepen/notes.md`) says a lit lamp beside a wire answers that wire's power with the
+same `direct_signal_to`, stone under a lever answers 15 with 15, while a lever, a torch, a repeater
+and a redstone block answer their own power with `direct_signal_to` 0. So the far lamp was a
+source of its own lit state: after the cut, wire 3 read the lamp's 13 back, kept raw 25 and stayed
+lit — a self-sustaining loop, independent of the review fixes (the noevict counterfactual failed
+identically).
+
+Fix: `runtime::foreign_signal(plain, conducted, known_source)` and `runtime::vanilla_source(block)`
+classify a **foreign** block from the two engine answers — a named source (or an emitter whose two
+answers differ, e.g. another mod's machine) gives its `signal`; a block that reports nothing but
+what it receives is a conductor or a sink and gives 0. `support::signal_toward` reads the plates
+from their state, the wire family from the wire power cache, and answers 0 for the bundled cable and
+the bitwise plates (neither emits vanilla power); the relay plate and the three posts are named
+sources of this port (`own_signal_source`), so they keep their own `signal` answer. This restores
+the recorded deviation "strong power conducted through a solid cube is not read" (the 0.2.0
+migration had widened the read to the conducting aggregate, which is what introduced the loop).
+Remaining corner, recorded as a gap: a relay's `minecraft:stone` template is a redstone conductor,
+so a wire reading a relay that is *strongly powered* (a redstone block beside it) sees the engine
+aggregate's `max(own, direct_signal_to)`; a wire beside a relay is not a wiring the mod supports
+(relays bridge the bundle) and the e2e does not place one.
+
+Tests (watched red against the missing API, 15 compile errors):
+`a_block_that_only_conducts_gives_no_signal`, `the_vanilla_source_table_names_the_blocks_that_emit`,
+`a_cut_line_drains_even_with_a_lit_lamp_beside_its_end` (the leg's rig: the middle wire feeds wire 3
+raw 27; cut, the sink gives nothing and the far side is 0).
+
+### 2. `LevelRef::signal` takes the reader-to-source direction; the port passed its opposite
+
+The SDK doc: "how strongly the block at `pos` powers the block on its `direction` side, as a block
+reads its neighbour `pos` that lies `direction` from it", and the pin's own
+`has_neighbor_signal` calls `signal(rel(pos, d), d)`. The port passed `from_reader.opposite()`.
+All-15 sources hid it (a redstone block, a lever, a torch answer 15 every way); the **directional
+repeater** exposed it: a `facing=west` repeater answers `signal(pos, West)` = 15 — the engine's
+exported facts (`block-behaviours.json`, weak nibble West = 15 for
+`[facing=west,powered=true]`) — so the wire on its east must be asked with the reader-to-source
+`West`, and read 0 before the fix. `signal_toward` now passes `from_dir(from_reader)`; the e2e phase
+`wire reads a vanilla lever and a repeater` reads wire `19,64,28` = 29 again.
+
+### 3. The 0.2.0 registration dropped the sixteen coloured cables from the Part list
+
+`wire_ids()` gave the wire block entity type all 17 ids, but `register` attached `RedstonePart`
+(the `block_signal` / `is_signal_source` / `neighbor_changed` / `state_for_placement` methods) only
+to the plain wire, the bundled cable, the relay and the three posts. A coloured cable therefore
+never heard `neighbor_changed` (so it never re-solved after its source was placed) and never
+answered `block_signal` (so no reader saw it): the e2e's red line read 0 with a dark lamp while the
+plain wire on the same geometry read 29/28/27. `support::signal_block_ids()` is now the one list
+every `block_part` loop uses; test `every_signal_block_gets_its_part` pins all 17 wire ids plus the
+gates, the cable, the relay and the posts.
+
+### 4. The solve pruned a forced subwire on every pass
+
+`prune_subwires` emulates `AbstractWireBlock.updateShape`, which upstream runs on a **neighbour**
+change. The 0.2.x solve ran it for every queued wire, so the 64-state sweep's
+`[down=true,east=true]` beside air was pruned before its read-back (the state stayed `down=true`
+only). `mark_wire_prune` arms the prune only from `neighbor_changed`; a write at the wire's own
+position (`block_changed`, `/setblock`, a piston) queues the solve **without** it, exactly as
+vanilla never re-evaluates a block's own shape on a write. Test
+`a_written_wire_is_pruned_only_after_a_neighbour_change`; the e2e phase `all 64 wire states are
+accepted` is the fail-capable proof (it failed before, reads back after).
+
+### In game
+
+Launcher 0.2.78, game at pin `0b14f8a` built with this package; `tools/e2e.sh`, The End, headless.
+The whole suite (gates, latch, pulse, wire, cable, bitwise, posts, coloured cables, placement,
+rotation, drops) ends `PASS` + `EXIT:0`. The wire phase, exactly:
+
+```
+== wire: the middle wire carries the far side (lamp and data differential) ==
+lamp 4,64,20: minecraft:redstone_lamp[lit=true]
+wire 1,64,20 power: 1, 64, 20 has the following block data: [I; 29, 0, 0, 0, 0, 0]
+wire 3,64,20 power: 3, 64, 20 has the following block data: [I; 27, 0, 0, 0, 0, 0]
+lamp 4,64,20: minecraft:redstone_lamp[lit=false]
+wire 1,64,20 power: 1, 64, 20 has the following block data: [I; 29, 0, 0, 0, 0, 0]
+wire 3,64,20 power: 3, 64, 20 has the following block data: [I; 0, 0, 0, 0, 0, 0]
+lamp 4,64,20: minecraft:redstone_lamp[lit=true]
+wire 3,64,20 power: 3, 64, 20 has the following block data: [I; 27, 0, 0, 0, 0, 0]
+lamp 4,64,20: minecraft:redstone_lamp[lit=false]
+wire 1,64,20 power: 1, 64, 20 has the following block data: [I; 0, 0, 0, 0, 0, 0]
+wire 3,64,20 power: 3, 64, 20 has the following block data: [I; 0, 0, 0, 0, 0, 0]
+```
+
+(the middle wire removed → lamp dark, far wire 0, near wire still 29; restored → 27 and lit; a stone
+source → both 0 and dark). The coloured-cable phase now reads `29, 28, 27` on the red line with its
+lamp lit and the blue line beside it at 0.
+
+| Leg | Log | Verdict |
+|---|---|---|
+| modded (`launcher-game.sh run morered`) | `../_shared/evidence/morered-e2e/e2e-launcher.log` | `PASS` + `EXIT:0` |
+| control (`GAME=$CONTROL_GAME`, same script) | `…/e2e-launcher-control.log` | `FAIL: the gate did not store A+C, state=minecraft:air` + `EXIT:1` |
+| `python3 ports/tools/check-e2e-logs.py morered-e2e --strict` | — | exit 0 (`logs=4 ok=4 missing-exit=0 bad-exit=0`) |
+
+### Ladder (0.2.2)
+
+| Check | Result |
+|---|---|
+| `cargo test --offline` | **84 passed**, 0 failed |
+| `cargo clippy --all-targets --offline -- -D warnings` | exit 0 |
+| `cargo fmt --check` | exit 0 |
+| two `rm -f Cargo.lock && cargo horizon-mod build` runs | byte-identical (`cmp`), 239,955 B |
+| `cargo horizon-mod check morered.hmod` | exit 0, `morered 0.2.2 …` |
+| `cargo horizon-mod fits morered.hmod --build 0b14f8a` | exit 0, `0b14f8a  made for` |
+
+**Package.** `morered.hmod` **239,955 B**, sha256
+`9f3370b86a092635e2d9b33071e231e7e0090ddc9add7794860d5ea961fdda5c` (413 entries, no
+`Cargo.lock`; `src/runtime.rs`/`src/support.rs` inside match the tree byte for byte). The entry's
+`sha256` and size change with it.
+
+## 26.3 dialect sweep (2026-11-21) — carried recipes and loot tables, proven in game (0.2.3)
+
+The shared checker `ports/tools/check_261_dialect.py` (generalised from `ports/modularrouters/tools/data_shape.py`
+and `ports/createaddition/tools/data_shape.py`) found the 1.21.1 forms still in the package that had shipped
+at **0.2.2**; `cargo horizon-mod check`, `fits` and every unit test had passed on them, and the content
+was dead in game (a recipe returns nothing; a block drops empty).
+
+| Family | Files | 1.21.1 form that shipped | 26.3 form |
+|---|---|---|---|
+| recipe ingredients | 4 (`redwire_post`, `redwire_post_plate`, `redwire_post_relay_plate`, `redwire_spool`): `{"tag": …}` in `key` | `{"item": "…"}` / `{"tag": "…"}` | `"minecraft:…"` / `"#c:…"` |
+| loot pools | 42 (10 with `"conditions": [ … ]`, all 42 with `bonus_rolls` and `"rolls": 1.0`) | `"conditions": [ … ]`, `bonus_rolls`, `"rolls": 1.0` | one `"condition": {"type": "minecraft:…"}`, no `bonus_rolls`, `"rolls": 1` |
+
+This port's 42 loot tables all carried 1.21.1 fields; only the 10 array-conditioned ones were dead in game before the sweep, and all 42 are now in the 26.3 shape the shared checker requires.
+
+**Red, kept:** `ports/_shared/evidence/morered/dialect-check-red.log` — the checker exits 1 on the pre-fix
+package itself (`dialect-prefix-0.2.2.hmod`, 0.2.2, kept in the same folder), naming every file.
+A reconstructed fixture carrying all three loot shapes plus a `requires_tool` block with no mineable tag is
+red too (`../../morered/dialect-check-fixture-red.log`). The checker's `--selftest` fails when any shape is
+accepted.
+
+  `recipe redwire_post.json: crafting_shaped -> {"count": 1, "item": "morered:redwire_post", "slot": 200}`; `the result reached the inventory (1 morered:redwire_post), the grid emptied, and morered:red_alloy_ingot was consumed`
+
+  `the vanilla control dropped one, morered:redwire_post dropped 1 morered:redwire_post, and the cell is air`
+
+The in-game leg is `tools/e2e-dialect.sh` (`ports/_shared/evidence/morered/e2e-dialect.log`): `PASS` + `EXIT:0`,
+and `SELFTEST=1` inverts the expectation and ends `FAIL` + `EXIT:1` (`e2e-dialect-selftest.log`).
+`check-e2e-logs.py morered --strict` exits 0.
+
+**Ladder** (all in `build-slot.sh` leases, `CARGO_INCREMENTAL=0`, `BUILD_LOCAL=1`):
+
+| Step | Command | Result |
+|---|---|---|
+| tests | `cargo test --offline` | **84 passed**, 0 failed (`dialect-test.log`) |
+| package | `rm -f Cargo.lock && cargo horizon-mod build` (twice) | built against **0a875da** (re-pinned from 0b14f8a), second build `cmp`-identical (`dialect-build-1.log`, `dialect-build-2.log`) |
+| registry check | `cargo horizon-mod check morered.hmod` | `morered 0.2.3 (native-mod, format native-1/0a875da…/e59da90…, for 26.3)`, **239,369 B**, sha256 `1dfa52998bcd…` (`dialect-check.log`) |
+| fits the pin | `cargo horizon-mod fits morered.hmod --build 0a875da` | `0a875da  made for`, exit 0 (`dialect-fits-0a875da.log`) |
+| fits the previous build | `… --build 0b14f8a` | `does not fit`, exit 1 (`dialect-fits-0b14f8a.log`) |
+| the gate | `python3 ports/tools/verify-sdk-package.py morered` | **1/1** (`dialect-gate.log`) |
+
+Package 0.2.3: **239,369 B**, SHA-256 `1dfa52998bcd77825a093dd1f8292425f132aaf691363d9ecd860c205ea1f4fb`.
+
+Skills: superpowers/using-superpowers,systematic-debugging,test-driven-development,verification-before-completion; BeautifulRust/none (no Rust change)

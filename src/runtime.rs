@@ -591,6 +591,56 @@ pub fn shares_attachment(face: Dir, neighbour: Attached, direction: Dir) -> bool
     neighbour.get(face) && face.axis() != direction.axis()
 }
 
+/// A foreign block's own power as a source, from the two answers the engine gives.
+///
+/// `LevelRef::signal` is `SignalGetter.getSignal`, "power it conducts included", so a
+/// **conductor** answers the power it receives — a lit redstone lamp beside a wire answers
+/// that wire's power — while a source answers its own. `LevelRef::direct_signal_to` is
+/// `getDirectSignalTo`, exactly what the block receives, so a block that reports nothing but
+/// what it receives is a conductor (or a sink), not a source. Vanilla's sources are named by
+/// [`vanilla_source`], so the corner where a source happens to receive exactly what it emits
+/// is still a source; an emitter the table does not know (another mod's machine) is
+/// recognised by the two answers differing. Measured at this pin: the table is in
+/// `ports/redstonepen/notes.md`.
+#[must_use]
+pub fn foreign_signal(plain: i32, conducted: i32, known_source: bool) -> i32 {
+    let plain = plain.clamp(0, 15);
+    if !known_source && plain == conducted.clamp(0, 15) {
+        0
+    } else {
+        plain
+    }
+}
+
+/// Whether `block` is one of vanilla's redstone sources: a block whose own signal is its
+/// power rather than the power it conducts. A redstone lamp, stone and air are not: they
+/// only pass on what they receive.
+#[must_use]
+pub fn vanilla_source(block: &str) -> bool {
+    let name = block.strip_prefix("minecraft:").unwrap_or(block);
+    matches!(
+        name,
+        "redstone_block"
+            | "redstone_torch"
+            | "redstone_wall_torch"
+            | "lever"
+            | "repeater"
+            | "comparator"
+            | "observer"
+            | "target"
+            | "daylight_detector"
+            | "trapped_chest"
+            | "detector_rail"
+            | "lectern"
+            | "sculk_sensor"
+            | "calibrated_sculk_sensor"
+            | "tripwire_hook"
+            | "redstone_wire"
+            | "lightning_rod"
+    ) || name.ends_with("_button")
+        || name.ends_with("_pressure_plate")
+}
+
 // ---------------------------------------------------------------------------
 // Coloured network cables (`wires/ColoredCableBlock*` upstream).
 //
@@ -1111,6 +1161,19 @@ pub fn post_signal(power: u8, attachment: Dir, kind: PostKind, face: Dir) -> i32
 /// The default link range (`ServerConfig.max_wire_plinth_connection_range`).
 pub const POST_LINK_RANGE: f64 = 32.0;
 
+/// The most links one post keeps. Upstream has no cap, so a post's peer list grows with every
+/// spool click and every solve clones it and enqueues it; the port bounds the adjacency so a
+/// saved post stays a fixed amount of work (the review finding). 32 is twice the links a
+/// useful alloy-wire junction needs and keeps one visit's fan-out small.
+pub const MAX_POST_LINKS: usize = 32;
+
+/// Whether `pos` is inside chunk `chunk` (`[x, z]`), with the level's own negative-coordinate
+/// floor, so a chunk unload can drop exactly its cached positions.
+#[must_use]
+pub fn in_chunk(pos: [i32; 3], chunk: [i32; 2]) -> bool {
+    pos[0].div_euclid(16) == chunk[0] && pos[2].div_euclid(16) == chunk[1]
+}
+
 /// `BlockPos.closerThan`: strictly inside the range, Euclidean.
 pub fn links_within(a: [i32; 3], b: [i32; 3], range: f64) -> bool {
     if range <= 0.0 {
@@ -1147,14 +1210,20 @@ impl PostLinks {
         self.0.contains(&offset)
     }
 
-    /// Add a link; false when it was already there.
+    /// Add a link; false when it was already there or the post is at [`MAX_POST_LINKS`].
     pub fn add(&mut self, offset: [i32; 3]) -> bool {
-        if self.contains(offset) {
+        if self.contains(offset) || self.0.len() >= MAX_POST_LINKS {
             false
         } else {
             self.0.push(offset);
             true
         }
+    }
+
+    /// Whether the post has all the links it may keep.
+    #[must_use]
+    pub fn is_full(&self) -> bool {
+        self.0.len() >= MAX_POST_LINKS
     }
 
     /// Drop a link; false when there was none.
@@ -1716,6 +1785,109 @@ mod tests {
         // Up is parallel to the attached down face: no edge in common.
         assert_eq!(wire_signal(power, attached, Dir::Up), 0);
         assert_eq!(wire_signal(power, Attached::NONE, Dir::North), 0);
+    }
+
+    /// A foreign block's own power, from the two answers the engine gives.
+    ///
+    /// Measured at this pin (`ports/redstonepen/notes.md`, probe table): the engine's
+    /// `signal` is `SignalGetter.getSignal`, "power it conducts included", so a
+    /// **conductor** answers the power it receives — a lit lamp beside a wire answers
+    /// that wire's power — while a source answers its own. `direct_signal_to` is what
+    /// the block receives, so a block that reports nothing but what it receives is a
+    /// conductor, not a source. Vanilla's sources are named so the corner where a
+    /// source receives exactly what it emits is still a source.
+    #[test]
+    fn a_block_that_only_conducts_gives_no_signal() {
+        // Sources: their plain answer is their own power.
+        assert_eq!(
+            foreign_signal(15, 0, true),
+            15,
+            "a lever or a redstone block"
+        );
+        assert_eq!(
+            foreign_signal(15, 7, true),
+            15,
+            "a source also conducted into"
+        );
+        assert_eq!(foreign_signal(12, 0, true), 12, "a powered redstone wire");
+        assert_eq!(foreign_signal(0, 0, true), 0, "a dark wire");
+        // Conductors and sinks: they answer what they receive, so they give nothing.
+        assert_eq!(
+            foreign_signal(13, 13, false),
+            0,
+            "a lit lamp beside the wire"
+        );
+        assert_eq!(foreign_signal(15, 15, false), 0, "stone under a lever");
+        assert_eq!(foreign_signal(0, 0, false), 0, "plain stone, air");
+        // An emitter the table does not know (another mod's machine) still emits.
+        assert_eq!(foreign_signal(15, 7, false), 15);
+        assert_eq!(foreign_signal(9, 3, false), 9);
+        assert_eq!(foreign_signal(200, 0, true), 15, "clamped like the hook");
+    }
+
+    /// The vanilla blocks whose own signal is their power rather than what they
+    /// conduct. A redstone lamp is a sink and is not one of them.
+    #[test]
+    fn the_vanilla_source_table_names_the_blocks_that_emit() {
+        for block in [
+            "minecraft:redstone_block",
+            "minecraft:lever",
+            "minecraft:redstone_torch",
+            "minecraft:redstone_wall_torch",
+            "minecraft:repeater",
+            "minecraft:comparator",
+            "minecraft:observer",
+            "minecraft:daylight_detector",
+            "minecraft:redstone_wire",
+            "minecraft:oak_button",
+            "minecraft:stone_pressure_plate",
+            "minecraft:tripwire_hook",
+        ] {
+            assert!(vanilla_source(block), "{block}");
+        }
+        for block in [
+            "minecraft:redstone_lamp",
+            "minecraft:stone",
+            "minecraft:air",
+            "morered:red_alloy_wire",
+        ] {
+            assert!(!vanilla_source(block), "{block}");
+        }
+        assert!(
+            vanilla_source("redstone_block"),
+            "the namespace is optional"
+        );
+    }
+
+    /// The in-game leg's wire phase: a three-wire line fed at the west end with a
+    /// lamp beside wire 3. Cutting the middle wire leaves wire 3 with the lamp as
+    /// its only remaining neighbour, and a lit lamp is a sink: the far side drains
+    /// and the lamp goes dark. (A lamp that fed the line back would hold it up
+    /// forever — the 0.2.1 failure.)
+    #[test]
+    fn a_cut_line_drains_even_with_a_lit_lamp_beside_its_end() {
+        let attached = Attached::from_bits([true, false, false, false, false, false]);
+        let east = Dir::East.index();
+        let down = Dir::Down.index();
+        // Wire 3's east face reads the lamp it lights: 13 is the wire's own signal
+        // (raw 27) coming back through the engine's conducting aggregate.
+        let lamp = foreign_signal(13, 13, vanilla_source("minecraft:redstone_lamp"));
+        let mut support = [0u8; 6];
+        support[east] = source_power(lamp);
+        // Before the cut the middle wire's subwire (raw 28) feeds wire 3.
+        let mut linked = [0u8; 6];
+        linked[down] = 28;
+        let powered = wire_power(attached, support, linked);
+        assert_eq!(powered[down], 27, "the middle wire carries the far side");
+        assert_eq!(
+            wire_signal(powered, attached, Dir::East),
+            13,
+            "the lamp is lit"
+        );
+        // The middle wire is gone: nothing linked, and the sink gives nothing.
+        let cut = wire_power(attached, support, [0u8; 6]);
+        assert_eq!(cut, [0u8; 6], "a sink cannot hold the line up");
+        assert_eq!(wire_signal(cut, attached, Dir::East), 0, "the lamp is dark");
     }
 
     #[test]
@@ -2390,5 +2562,42 @@ mod tests {
             spool_click(Some(a), [20, 84, 20], false, range),
             SpoolClick::TooFar
         );
+    }
+
+    /// The review finding: a post's adjacency had no per-post bound, so a saved peer list could
+    /// grow without limit and every solve cloned and enqueued all of it.
+    #[test]
+    fn a_post_keeps_a_bounded_number_of_links() {
+        let mut links = PostLinks::default();
+        for index in 0..MAX_POST_LINKS {
+            assert!(
+                links.add([index as i32, 0, 0]),
+                "link {index} is under the cap"
+            );
+        }
+        assert!(links.is_full());
+        assert_eq!(links.offsets().len(), MAX_POST_LINKS);
+        assert!(
+            !links.add([999, 0, 0]),
+            "a post at its cap refuses another link"
+        );
+        assert_eq!(
+            links.offsets().len(),
+            MAX_POST_LINKS,
+            "the list did not grow"
+        );
+        assert!(!links.add([0, 0, 0]), "a duplicate is still refused");
+    }
+
+    /// The second review finding's chunk half: a cached position belongs to exactly one chunk,
+    /// including west of the origin, so a chunk unload can drop it.
+    #[test]
+    fn a_position_belongs_to_its_own_chunk() {
+        assert!(in_chunk([0, 64, 0], [0, 0]));
+        assert!(in_chunk([15, 64, 15], [0, 0]));
+        assert!(in_chunk([16, 64, 0], [1, 0]));
+        assert!(!in_chunk([16, 64, 0], [0, 0]));
+        assert!(in_chunk([-1, 64, -1], [-1, -1]), "west and north");
+        assert!(!in_chunk([-1, 64, 0], [0, 0]), "x and z are separate axes");
     }
 }

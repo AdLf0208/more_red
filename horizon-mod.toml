@@ -1,6 +1,6 @@
 id = "morered"
 name = "More Red"
-version = "0.2.0"
+version = "0.2.3"
 description = """A port of More Red for Horizon: the logic gate plates (diode, NOT, AND/NAND, OR/NOR, XOR/XNOR,
 multiplexer, 2-input gates, latch, pulse gate), the bitwise channeled plates, the red alloy wire, the
 sixteen coloured network cables, the bundled cable with its relay plate, and the red-alloy wire posts
@@ -17,5 +17,5 @@ capabilities = ["registries"]
 
 [native]
 game = "26.3"
-horizon = "0b14f8acfd97fa2c750e42795249dcc981178ca4"
+horizon = "0a875da91dbb0fdcb7ba8c42c11341aa229af51a"
 mixins = "e59da9094f0c2fdda6c627fe9eff22dec6a906f0"

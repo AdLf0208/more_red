@@ -57,6 +57,12 @@ impl Hooks for Mod {
         support::on_loot_drops(host, event);
     }
 
+    /// A chunk left the world: the caches this port keeps for its positions go with it, so a
+    /// player's building and removing blocks does not leak entries for the runtime's life.
+    fn chunk_unload(&self, _: &mut dyn ServerHost, event: &mut mod_api::ChunkUnloadEvent<'_>) {
+        support::on_chunk_unload(event.dimension, event.chunk);
+    }
+
     /// The world is going away: nothing queued or cached belongs to the next one.
     fn world_lifecycle(&self, _: &mut dyn ServerHost, _: &mut WorldLifecycleEvent<'_>) {
         support::reset_world_state();
